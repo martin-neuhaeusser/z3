@@ -22,45 +22,13 @@ Notes:
 #include"ast_smt2_pp.h"
 
 
-mk_extract_proc::mk_extract_proc(bv_util & u):
-    m_util(u),
-    m_high(0),
-    m_low(UINT_MAX),
-    m_domain(0),
-    m_f_cached(0) {
-}
-
-mk_extract_proc::~mk_extract_proc() {
-    if (m_f_cached) {
-        // m_f_cached has a reference to m_domain, so, I don't need to inc_ref m_domain
-        ast_manager & m = m_util.get_manager();
-        m.dec_ref(m_f_cached);
-    }
-}
-
-app * mk_extract_proc::operator()(unsigned high, unsigned low, expr * arg) {
-    ast_manager & m = m_util.get_manager();
-    sort * s = m.get_sort(arg);
-    if (m_low == low && m_high == high && m_domain == s)
-        return m.mk_app(m_f_cached, arg);
-    // m_f_cached has a reference to m_domain, so, I don't need to inc_ref m_domain
-    if (m_f_cached)
-        m.dec_ref(m_f_cached);
-    app * r    = to_app(m_util.mk_extract(high, low, arg));
-    m_high     = high;
-    m_low      = low;
-    m_domain   = s;
-    m_f_cached = r->get_decl();
-    m.inc_ref(m_f_cached);
-    return r;
-}
-
 void bv_rewriter::updt_local_params(params_ref const & _p) {
     bv_rewriter_params p(_p);
     m_hi_div0 = p.hi_div0();
     m_elim_sign_ext = p.elim_sign_ext();
     m_mul2concat = p.mul2concat();
     m_bit2bool = p.bit2bool();
+    m_trailing = p.bv_trailing();
     m_blast_eq_value = p.blast_eq_value();
     m_split_concat_eq = p.split_concat_eq();
     m_udiv2mul = p.udiv2mul();
@@ -221,6 +189,12 @@ br_status bv_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * cons
         return mk_bv_comp(args[0], args[1], result);
     case OP_MKBV:
         return mk_mkbv(num_args, args, result);
+    case OP_BSMUL_NO_OVFL:
+        return mk_bvsmul_no_overflow(num_args, args, result);
+    case OP_BUMUL_NO_OVFL:
+        return mk_bvumul_no_overflow(num_args, args, result);
+    case OP_BSMUL_NO_UDFL:
+        return mk_bvsmul_no_underflow(num_args, args, result);
     default:
         return BR_FAILED;
     }
@@ -278,7 +252,7 @@ br_status bv_rewriter::mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref 
         r2 = m_util.norm(r2, sz, is_signed);
 
     if (is_num1 && is_num2) {
-        result = r1 <= r2 ? m().mk_true() : m().mk_false();
+        result = m().mk_bool_val(r1 <= r2);
         return BR_DONE;
     }
 
@@ -892,7 +866,7 @@ br_status bv_rewriter::mk_bv_urem_core(expr * arg1, expr * arg2, bool hi_div0, e
         if (r2.is_zero()) {
             if (!hi_div0) {
                 result = m().mk_app(get_fid(), OP_BUREM0, arg1);
-                return BR_DONE;
+                return BR_REWRITE1;
             }
             else {
                 // The "hardware interpretation" for (bvurem x 0) is x
@@ -1131,6 +1105,8 @@ br_status bv_rewriter::mk_concat(unsigned num_args, expr * const * args, expr_re
     else
         return BR_DONE;
 }
+
+
 
 br_status bv_rewriter::mk_zero_extend(unsigned n, expr * arg, expr_ref & result) {
     if (n == 0) {
@@ -1809,7 +1785,7 @@ br_status bv_rewriter::mk_bit2bool(expr * lhs, expr * rhs, expr_ref & result) {
 
     if (is_numeral(lhs)) {
         SASSERT(is_numeral(rhs));
-        result = lhs == rhs ? m().mk_true() : m().mk_false();
+        result = m().mk_bool_val(lhs == rhs);
         return BR_DONE;
     }
 
@@ -2124,6 +2100,15 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
             return st;
     }
 
+    if (m_trailing) {
+        st = m_rm_trailing.eq_remove_trailing(lhs, rhs, result);
+        m_rm_trailing.reset_cache(1 << 12);
+        if (st != BR_FAILED) {
+            TRACE("eq_remove_trailing", tout << mk_ismt2_pp(lhs, m()) << "\n=\n" << mk_ismt2_pp(rhs, m()) << "\n----->\n" << mk_ismt2_pp(result, m()) << "\n";);
+            return st;
+        }
+    }
+
     st = mk_mul_eq(lhs, rhs, result);
     if (st != BR_FAILED) {
         TRACE("mk_mul_eq", tout << mk_ismt2_pp(lhs, m()) << "\n=\n" << mk_ismt2_pp(rhs, m()) << "\n----->\n" << mk_ismt2_pp(result,m()) << "\n";);
@@ -2149,7 +2134,7 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
         st = cancel_monomials(lhs, rhs, false, new_lhs, new_rhs);
         if (st != BR_FAILED) {
             if (is_numeral(new_lhs) && is_numeral(new_rhs)) {
-                result = new_lhs == new_rhs ? m().mk_true() : m().mk_false();
+                result = m().mk_bool_val(new_lhs == new_rhs);
                 return BR_DONE;
             }
         }
@@ -2187,6 +2172,7 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
     return BR_FAILED;
 }
 
+
 br_status bv_rewriter::mk_mkbv(unsigned num, expr * const * args, expr_ref & result) {
     if (m_mkbv2num) {
         unsigned i;
@@ -2208,6 +2194,88 @@ br_status bv_rewriter::mk_mkbv(unsigned num, expr * const * args, expr_ref & res
     return BR_FAILED;
 }
 
+br_status bv_rewriter::mk_bvsmul_no_overflow(unsigned num, expr * const * args, expr_ref & result) {
+    SASSERT(num == 2);
+    unsigned bv_sz;
+    rational a0_val, a1_val;
+
+    bool is_num1 = is_numeral(args[0], a0_val, bv_sz);
+    bool is_num2 = is_numeral(args[1], a1_val, bv_sz);
+    if (is_num1 && (a0_val.is_zero() || a0_val.is_one())) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+    if (is_num2 && (a1_val.is_zero() || a1_val.is_one())) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+
+    if (is_num1 && is_num2) {
+        rational mr = a0_val * a1_val;
+        rational lim = rational::power_of_two(bv_sz-1);
+        result = m().mk_bool_val(mr < lim);
+        return BR_DONE;
+    }
+
+    return BR_FAILED;
+}
+
+br_status bv_rewriter::mk_bvumul_no_overflow(unsigned num, expr * const * args, expr_ref & result) {
+    SASSERT(num == 2);
+    unsigned bv_sz;
+    rational a0_val, a1_val;
+
+    bool is_num1 = is_numeral(args[0], a0_val, bv_sz);
+    bool is_num2 = is_numeral(args[1], a1_val, bv_sz);
+    if (is_num1 && (a0_val.is_zero() || a0_val.is_one())) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+    if (is_num2 && (a1_val.is_zero() || a1_val.is_one())) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+
+    if (is_num1 && is_num2) {
+        rational mr = a0_val * a1_val;
+        rational lim = rational::power_of_two(bv_sz);
+        result = m().mk_bool_val(mr < lim);
+        return BR_DONE;
+    }
+
+    return BR_FAILED;
+}
+
+br_status bv_rewriter::mk_bvsmul_no_underflow(unsigned num, expr * const * args, expr_ref & result) {
+    SASSERT(num == 2);
+    unsigned bv_sz;
+    rational a0_val, a1_val;
+
+    bool is_num1 = is_numeral(args[0], a0_val, bv_sz);
+    bool is_num2 = is_numeral(args[1], a1_val, bv_sz);
+    if (is_num1 && (a0_val.is_zero() || a0_val.is_one())) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+    if (is_num2 && (a1_val.is_zero() || a1_val.is_one())) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+
+    if (is_num1 && is_num2) {
+        rational ul = rational::power_of_two(bv_sz);
+        rational lim = rational::power_of_two(bv_sz-1);
+        if (a0_val >= lim) a0_val -= ul;
+        if (a1_val >= lim) a1_val -= ul;        
+        rational mr = a0_val * a1_val;
+        rational neg_lim = -lim;
+        TRACE("bv_rewriter_bvsmul_no_underflow", tout << "a0:" << a0_val << " a1:" << a1_val << " mr:" << mr << " neg_lim:" << neg_lim << std::endl;);
+        result = m().mk_bool_val(mr >= neg_lim);
+        return BR_DONE;
+    }
+
+    return BR_FAILED;
+}
+
 
 template class poly_rewriter<bv_rewriter_core>;
-

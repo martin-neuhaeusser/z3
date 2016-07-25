@@ -462,7 +462,7 @@ func_decl * datatype_decl_plugin::mk_update_field(
     }
     range = domain[0];
     func_decl_info info(m_family_id, k, num_parameters, parameters);
-    return m.mk_func_decl(symbol("update_field"), arity, domain, range, info);
+    return m.mk_func_decl(symbol("update-field"), arity, domain, range, info);
 }
 
 func_decl * datatype_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, parameter const * parameters, 
@@ -933,6 +933,25 @@ bool datatype_util::is_recursive(sort * ty) {
     return r;
 }
 
+
+bool datatype_util::is_enum_sort(sort* s) {
+	if (!is_datatype(s)) {
+		return false;
+	}
+    bool r = false;
+    if (m_is_enum.find(s, r))
+        return r;
+    ptr_vector<func_decl> const& cnstrs = *get_datatype_constructors(s);
+    r = true;
+    for (unsigned i = 0; r && i < cnstrs.size(); ++i) {
+        r = cnstrs[i]->get_arity() == 0;
+    }
+    m_is_enum.insert(s, r);
+    m_asts.push_back(s);
+    return r;
+}
+
+
 void datatype_util::reset() {
     m_datatype2constructors.reset();
     m_datatype2nonrec_constructor.reset();
@@ -941,6 +960,7 @@ void datatype_util::reset() {
     m_recognizer2constructor.reset();
     m_accessor2constructor.reset();
     m_is_recursive.reset();
+    m_is_enum.reset();
     std::for_each(m_vectors.begin(), m_vectors.end(), delete_proc<ptr_vector<func_decl> >());
     m_vectors.reset();
     m_asts.reset();
@@ -1000,3 +1020,25 @@ void datatype_util::display_datatype(sort *s0, std::ostream& strm) {
     }
 
 }
+
+bool datatype_util::is_func_decl(datatype_op_kind k, unsigned num_params, parameter const* params, func_decl* f) {
+    bool eq = 
+        f->get_decl_kind() == k &&
+        f->get_family_id() == m_family_id &&
+        f->get_num_parameters() == num_params;
+    for (unsigned i = 0; eq && i < num_params; ++i) {
+        eq = params[i] == f->get_parameter(i);
+    }
+    return eq;
+}
+
+bool datatype_util::is_constructor_of(unsigned num_params, parameter const* params, func_decl* f) {
+    return 
+        num_params == 2 &&
+        m_family_id == f->get_family_id() &&
+        OP_DT_CONSTRUCTOR == f->get_decl_kind() &&
+        2 == f->get_num_parameters() &&
+        params[0] == f->get_parameter(0) &&
+        params[1] == f->get_parameter(1);
+}
+

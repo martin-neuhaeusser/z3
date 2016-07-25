@@ -604,8 +604,16 @@ namespace z3 {
 
         /**
            \brief Return true if this expression is a numeral.
+           Specialized functions also return representations for the numerals as
+           small integers, 64 bit integers or rational or decimal strings.
         */
         bool is_numeral() const { return kind() == Z3_NUMERAL_AST; }
+        bool is_numeral_i64(__int64& i) const { bool r = 0 != Z3_get_numeral_int64(ctx(), m_ast, &i); check_error(); return r;}
+        bool is_numeral_u64(__uint64& i) const { bool r = 0 != Z3_get_numeral_uint64(ctx(), m_ast, &i); check_error(); return r;}
+        bool is_numeral_i(int& i) const { bool r = 0 != Z3_get_numeral_int(ctx(), m_ast, &i); check_error(); return r;}
+        bool is_numeral_u(unsigned& i) const { bool r = 0 != Z3_get_numeral_uint(ctx(), m_ast, &i); check_error(); return r;}
+        bool is_numeral(std::string& s) const { if (!is_numeral()) return false; s = Z3_get_numeral_string(ctx(), m_ast); check_error(); return true; }
+        bool is_numeral(std::string& s, unsigned precision) const { if (!is_numeral()) return false; s = Z3_get_numeral_decimal_string(ctx(), m_ast, precision); check_error(); return true; }
         /**
            \brief Return true if this expression is an application.
         */
@@ -622,11 +630,86 @@ namespace z3 {
            \brief Return true if this expression is a variable.
         */
         bool is_var() const { return kind() == Z3_VAR_AST; }
+        /**
+           \brief Return true if expression is an algebraic number.
+        */
+        bool is_algebraic() const { return 0 != Z3_is_algebraic_number(ctx(), m_ast); }
 
         /**
            \brief Return true if this expression is well sorted (aka type correct).
         */
         bool is_well_sorted() const { bool r = Z3_is_well_sorted(ctx(), m_ast) != 0; check_error(); return r; }
+        
+        /**
+           \brief Return string representation of numeral or algebraic number
+           This method assumes the expression is numeral or algebraic
+           
+           \pre is_numeral() || is_algebraic()
+        */
+        std::string get_decimal_string(int precision) const {
+            assert(is_numeral() || is_algebraic());
+            return std::string(Z3_get_numeral_decimal_string(ctx(), m_ast, precision));
+        }
+        
+        /**
+           \brief Return int value of numeral, throw if result cannot fit in
+           machine int
+           
+           \pre is_numeral()
+        */
+        int get_numeral_int() const {             
+            int result;
+            if (!is_numeral_i(result)) {
+                throw exception("numeral does not fit in machine int");
+            }
+            return result;
+        }
+        
+        /**
+           \brief Return uint value of numeral, throw if result cannot fit in
+           machine uint
+           
+           \pre is_numeral()
+        */
+        unsigned get_numeral_uint() const {
+            assert(is_numeral());
+            unsigned result;
+            if (!is_numeral_u(result)) {
+                throw exception("numeral does not fit in machine uint");
+            }
+            return result;
+        }
+        
+        /**
+           \brief Return __int64 value of numeral, throw if result cannot fit in
+           __int64
+           
+           \pre is_numeral()
+        */
+        __int64 get_numeral_int64() const {
+            assert(is_numeral());
+            __int64 result;
+            if (!is_numeral_i64(result)) {
+                throw exception("numeral does not fit in machine __int64");
+            }
+            return result;
+        }
+        
+        /**
+           \brief Return __uint64 value of numeral, throw if result cannot fit in
+           __uint64
+           
+           \pre is_numeral()
+        */
+        __uint64 get_numeral_uint64() const {
+            assert(is_numeral());
+            __uint64 result;
+            if (!is_numeral_u64(result)) {
+                throw exception("numeral does not fit in machine __uint64");
+            }
+            return result;
+        }
+           
 
         operator Z3_app() const { assert(is_app()); return reinterpret_cast<Z3_app>(m_ast); }
 
@@ -719,6 +802,9 @@ namespace z3 {
         friend expr implies(expr const & a, bool b);
         friend expr implies(bool a, expr const & b);
 
+        friend expr mk_or(expr_vector const& args);
+        friend expr mk_and(expr_vector const& args);
+
         friend expr ite(expr const & c, expr const & t, expr const & e);
 
         friend expr distinct(expr_vector const& args);
@@ -793,7 +879,7 @@ namespace z3 {
         unsigned lo() const { assert (is_app() && Z3_get_decl_num_parameters(ctx(), decl()) == 2); return static_cast<unsigned>(Z3_get_decl_int_parameter(ctx(), decl(), 1)); }
         unsigned hi() const { assert (is_app() && Z3_get_decl_num_parameters(ctx(), decl()) == 2); return static_cast<unsigned>(Z3_get_decl_int_parameter(ctx(), decl(), 0)); }
 
-        /**
+		/**
            \brief sequence and regular expression operations.
            + is overloaeded as sequence concatenation and regular expression union.
            concat is overloaded to handle sequences and regular expressions
@@ -863,6 +949,7 @@ namespace z3 {
     }
     inline expr implies(expr const & a, bool b) { return implies(a, a.ctx().bool_val(b)); }
     inline expr implies(bool a, expr const & b) { return implies(b.ctx().bool_val(a), b); }
+
 
     inline expr pw(expr const & a, expr const & b) {
         assert(a.is_arith() && b.is_arith());
@@ -1192,6 +1279,51 @@ namespace z3 {
     inline expr udiv(expr const & a, int b) { return udiv(a, a.ctx().num_val(b, a.get_sort())); }
     inline expr udiv(int a, expr const & b) { return udiv(b.ctx().num_val(a, b.get_sort()), b); }
 
+	/**
+		\brief signed reminder operator for bitvectors
+	*/
+	inline expr srem(expr const & a, expr const & b) { return to_expr(a.ctx(), Z3_mk_bvsrem(a.ctx(), a, b)); }
+	inline expr srem(expr const & a, int b) { return srem(a, a.ctx().num_val(b, a.get_sort())); }
+	inline expr srem(int a, expr const & b) { return srem(b.ctx().num_val(a, b.get_sort()), b); }
+
+	/**
+	\brief unsigned reminder operator for bitvectors
+	*/
+	inline expr urem(expr const & a, expr const & b) { return to_expr(a.ctx(), Z3_mk_bvurem(a.ctx(), a, b)); }
+	inline expr urem(expr const & a, int b) { return urem(a, a.ctx().num_val(b, a.get_sort())); }
+	inline expr urem(int a, expr const & b) { return urem(b.ctx().num_val(a, b.get_sort()), b); }
+
+	/**
+	\brief shift left operator for bitvectors
+	*/
+	inline expr shl(expr const & a, expr const & b) { return to_expr(a.ctx(), Z3_mk_bvshl(a.ctx(), a, b)); }
+	inline expr shl(expr const & a, int b) { return shl(a, a.ctx().num_val(b, a.get_sort())); }
+	inline expr shl(int a, expr const & b) { return shl(b.ctx().num_val(a, b.get_sort()), b); }
+
+	/**
+	\brief logic shift right operator for bitvectors
+	*/
+	inline expr lshr(expr const & a, expr const & b) { return to_expr(a.ctx(), Z3_mk_bvlshr(a.ctx(), a, b)); }
+	inline expr lshr(expr const & a, int b) { return lshr(a, a.ctx().num_val(b, a.get_sort())); }
+	inline expr lshr(int a, expr const & b) { return lshr(b.ctx().num_val(a, b.get_sort()), b); }
+
+	/**
+	\brief arithmetic shift right operator for bitvectors
+	*/
+	inline expr ashr(expr const & a, expr const & b) { return to_expr(a.ctx(), Z3_mk_bvashr(a.ctx(), a, b)); }
+	inline expr ashr(expr const & a, int b) { return ashr(a, a.ctx().num_val(b, a.get_sort())); }
+	inline expr ashr(int a, expr const & b) { return ashr(b.ctx().num_val(a, b.get_sort()), b); }
+
+	/**
+	\brief Extend the given bit-vector with zeros to the (unsigned) equivalent bitvector of size m+i, where m is the size of the given bit-vector.
+	*/
+	inline expr zext(expr const & a, unsigned i) { return to_expr(a.ctx(), Z3_mk_zero_ext(a.ctx(), i, a)); }
+
+	/**
+	\brief Sign-extend of the given bit-vector to the (signed) equivalent bitvector of size m+i, where m is the size of the given bit-vector.
+	*/
+	inline expr sext(expr const & a, unsigned i) { return to_expr(a.ctx(), Z3_mk_sign_ext(a.ctx(), i, a)); }
+
     template<typename T> class cast_ast;
 
     template<> class cast_ast<ast> {
@@ -1369,6 +1501,20 @@ namespace z3 {
         return expr(ctx, r);
     }
 
+    inline expr mk_or(expr_vector const& args) { 
+        array<Z3_ast> _args(args);
+        Z3_ast r = Z3_mk_or(args.ctx(), _args.size(), _args.ptr());
+        args.check_error();
+        return expr(args.ctx(), r);
+    }
+    inline expr mk_and(expr_vector const& args) {
+        array<Z3_ast> _args(args);
+        Z3_ast r = Z3_mk_and(args.ctx(), _args.size(), _args.ptr());
+        args.check_error();
+        return expr(args.ctx(), r);
+    }
+
+
     class func_entry : public object {
         Z3_func_entry m_entry;
         void init(Z3_func_entry e) {
@@ -1454,6 +1600,9 @@ namespace z3 {
 	    return static_cast<unsigned>(i) < num_consts() ? get_const_decl(i) : get_func_decl(i - num_consts());
 	}
 
+        // returns interpretation of constant declaration c.
+        // If c is not assigned any value in the model it returns 
+        // an expression with a null ast reference.
         expr get_const_interp(func_decl c) const {
             check_context(*this, c);
             Z3_ast r = Z3_model_get_const_interp(ctx(), m_model, c);

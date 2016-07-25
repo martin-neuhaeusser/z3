@@ -233,10 +233,16 @@ public:
             }
 
             lbool r;
-            if (assumptions.empty())
-                r = m_ctx->setup_and_check();
-            else
-                r = m_ctx->check(assumptions.size(), assumptions.c_ptr());
+            try {
+                if (assumptions.empty())
+                    r = m_ctx->setup_and_check();
+                else
+                    r = m_ctx->check(assumptions.size(), assumptions.c_ptr());
+            }
+            catch(...) {
+                m_ctx->collect_statistics(m_stats);
+                throw;
+            }
             m_ctx->collect_statistics(m_stats);
             switch (r) {
             case l_true: {
@@ -284,8 +290,14 @@ public:
                 return;
             }
             case l_undef:
-                if (m_fail_if_inconclusive)
-                    throw tactic_exception("smt tactic failed to show goal to be sat/unsat");
+                if (m_ctx->canceled()) {
+                    throw tactic_exception(Z3_CANCELED_MSG);
+                }
+                if (m_fail_if_inconclusive) {
+                    std::stringstream strm;
+                    strm << "smt tactic failed to show goal to be sat/unsat " << m_ctx->last_failure_as_string();
+                    throw tactic_exception(strm.str().c_str());
+                }
                 result.push_back(in.get());
                 if (m_candidate_models) {
                     switch (m_ctx->last_failure()) {

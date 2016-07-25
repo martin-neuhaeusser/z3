@@ -103,8 +103,8 @@ template<typename Config>
 template<bool ProofGen>
 bool rewriter_tpl<Config>::visit(expr * t, unsigned max_depth) {
     TRACE("rewriter_visit", tout << "visiting\n" << mk_ismt2_pp(t, m()) << "\n";);
-    expr *  new_t;
-    proof * new_t_pr;
+    expr *  new_t = 0;
+    proof * new_t_pr = 0;
     if (m_cfg.get_subst(t, new_t, new_t_pr)) {
         TRACE("rewriter_subst", tout << "subst\n" << mk_ismt2_pp(t, m()) << "\n---->\n" << mk_ismt2_pp(new_t, m()) << "\n";);
         SASSERT(m().get_sort(t) == m().get_sort(new_t));
@@ -595,6 +595,9 @@ void rewriter_tpl<Config>::set_inv_bindings(unsigned num_bindings, expr * const 
 template<typename Config>
 template<bool ProofGen>
 void rewriter_tpl<Config>::main_loop(expr * t, expr_ref & result, proof_ref & result_pr) {
+    if (m_cancel_check && m().canceled()) {
+        throw rewriter_exception(m().limit().get_cancel_msg());
+    }
     SASSERT(!ProofGen || result_stack().size() == result_pr_stack().size());
     SASSERT(not_rewriting());
     m_root      = t;
@@ -626,7 +629,7 @@ template<bool ProofGen>
 void rewriter_tpl<Config>::resume_core(expr_ref & result, proof_ref & result_pr) {
     SASSERT(!frame_stack().empty());
     while (!frame_stack().empty()) {
-        if (m().canceled()) {
+        if (m_cancel_check && m().canceled()) {
             throw rewriter_exception(m().limit().get_cancel_msg());
         }
         SASSERT(!ProofGen || result_stack().size() == result_pr_stack().size());

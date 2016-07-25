@@ -945,6 +945,8 @@ typedef enum
 
       - Z3_OP_FPA_TO_IEEE_BV: Floating-point conversion to IEEE-754 bit-vector
 
+      - Z3_OP_INTERNAL: internal (often interpreted) symbol, but no additional information is exposed. Tools may use the string representation of the function declaration to obtain more information.
+
       - Z3_OP_UNINTERPRETED: kind used for uninterpreted symbols.
 */
 typedef enum {
@@ -1059,6 +1061,15 @@ typedef enum {
     Z3_OP_BV2INT,
     Z3_OP_CARRY,
     Z3_OP_XOR3,
+
+    Z3_OP_BSMUL_NO_OVFL,
+    Z3_OP_BUMUL_NO_OVFL,
+    Z3_OP_BSMUL_NO_UDFL,
+    Z3_OP_BSDIV_I,
+    Z3_OP_BUDIV_I,
+    Z3_OP_BSREM_I,
+    Z3_OP_BUREM_I,
+    Z3_OP_BSMOD_I,
 
     // Proofs
     Z3_OP_PR_UNDEF = 0x500,
@@ -1204,6 +1215,11 @@ typedef enum {
     Z3_OP_FPA_TO_REAL,
 
     Z3_OP_FPA_TO_IEEE_BV,
+
+    Z3_OP_FPA_MIN_I,
+    Z3_OP_FPA_MAX_I,
+
+    Z3_OP_INTERNAL,
 
     Z3_OP_UNINTERPRETED
 } Z3_decl_kind;
@@ -3056,7 +3072,8 @@ extern "C" {
        \brief Create a numeral of a given sort.
 
        \param c logical context.
-       \param numeral A string representing the numeral value in decimal notation. If the given sort is a real, then the numeral can be a rational, that is, a string of the form \ccode{[num]* / [num]*}.
+       \param numeral A string representing the numeral value in decimal notation. The string may be of the form \code{[num]*[.[num]*][E[+|-][num]+]}.
+                      If the given sort is a real, then the numeral can be a rational, that is, a string of the form \ccode{[num]* / [num]*}.                      
        \param ty The sort of the numeral. In the current implementation, the given sort can be an int, real, finite-domain, or bit-vectors of arbitrary size.
 
        \sa Z3_mk_int
@@ -4538,6 +4555,9 @@ extern "C" {
        If \c model_completion is Z3_TRUE, then Z3 will assign an interpretation for any constant or function that does
        not have an interpretation in \c m. These constants and functions were essentially don't cares.
 
+       If \c model_completion is Z3_FALSE, then Z3 will not assign interpretations to constants for functions that do
+       not have interpretations in \c m. Evaluation behaves as the identify function in this case.
+
        The evaluation may fail for the following reasons:
 
        - \c t contains a quantifier.
@@ -4546,6 +4566,8 @@ extern "C" {
        That is, the option \ccode{MODEL_PARTIAL=true} was used.
 
        - \c t is type incorrect.
+
+       - \c Z3_interrupt was invoked during evaluation.
 
        def_API('Z3_model_eval', BOOL, (_in(CONTEXT), _in(MODEL), _in(AST), _in(BOOL), _out(AST)))
     */
@@ -5098,6 +5120,13 @@ extern "C" {
        def_API('Z3_get_error_msg', STRING, (_in(CONTEXT), _in(ERROR_CODE)))
     */
     Z3_string Z3_API Z3_get_error_msg(Z3_context c, Z3_error_code err);
+    /*@}*/
+
+    /**
+       \brief Return a string describing the given error code. 
+       Retained function name for backwards compatibility within v4.1
+    */
+    Z3_string Z3_API Z3_get_error_msg_ex(Z3_context c, Z3_error_code err);
     /*@}*/
 
     /** @name Miscellaneous */

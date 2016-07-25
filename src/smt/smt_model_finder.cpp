@@ -149,6 +149,7 @@ namespace smt {
                     SASSERT(!contains_model_value(t));
                     unsigned gen = (*it).m_value;
                     expr * t_val = ev.eval(t, true);
+                    if (!t_val) break;
                     TRACE("model_finder", tout << mk_pp(t, m_manager) << " " << mk_pp(t_val, m_manager) << "\n";);
 
                     expr * old_t = 0;
@@ -828,7 +829,7 @@ namespace smt {
                 for (; it != end; ++it) {
                     expr *     t = (*it).m_key;
                     expr * t_val = eval(t, true);
-                    if (!already_found.contains(t_val)) {
+                    if (t_val && !already_found.contains(t_val)) {
                         values.push_back(t_val);
                         already_found.insert(t_val);
                     }
@@ -891,6 +892,7 @@ namespace smt {
                 add_mono_exceptions(n);
                 ptr_buffer<expr> values;
                 get_instantiation_set_values(n, values);
+                if (values.empty()) return;
                 sort_values(n, values);
                 sort * s = n->get_sort();
                 arith_simplifier_plugin * as = get_arith_simp();
@@ -1754,16 +1756,16 @@ namespace smt {
 
             void insert_qinfo(qinfo * qi) {
                 // I'm assuming the number of qinfo's per quantifier is small. So, the linear search is not a big deal.
+                scoped_ptr<qinfo> q(qi);
                 ptr_vector<qinfo>::iterator it  = m_qinfo_vect.begin();            
                 ptr_vector<qinfo>::iterator end = m_qinfo_vect.end();            
                 for (; it != end; ++it) {
                     checkpoint();
                     if (qi->is_equal(*it)) {
-                        dealloc(qi);
                         return;
                     }
                 }
-                m_qinfo_vect.push_back(qi);
+                m_qinfo_vect.push_back(q.detach());
                 TRACE("model_finder", tout << "new quantifier qinfo: "; qi->display(tout); tout << "\n";);
             }
 
@@ -2897,15 +2899,16 @@ namespace smt {
             }
             
             bool check_satisfied_residue_invariant() {
-                qsset::iterator it  = m_satisfied.begin();
-                qsset::iterator end = m_satisfied.end();
-                for (; it != end; ++it) {
-                    quantifier * q = *it;
-                    SASSERT(!m_residue.contains(q));
-                    quantifier_info * qi = get_qinfo(q);
-                    SASSERT(qi != 0);
-                    SASSERT(qi->get_the_one() != 0);
-                }
+                DEBUG_CODE(
+                    qsset::iterator it  = m_satisfied.begin();
+                    qsset::iterator end = m_satisfied.end();
+                    for (; it != end; ++it) {
+                        quantifier * q = *it;
+                        SASSERT(!m_residue.contains(q));
+                        quantifier_info * qi = get_qinfo(q);
+                        SASSERT(qi != 0);
+                        SASSERT(qi->get_the_one() != 0);
+                    });
                 return true;
             }
 
@@ -3542,14 +3545,10 @@ namespace smt {
         //
         // Since we only care about q (and its bindings), it only makes sense to restrict the variables of q.
         bool asserted_something = false;
-        quantifier * flat_q = get_flat_quantifier(q);
         unsigned num_decls      = q->get_num_decls();
-        unsigned flat_num_decls = flat_q->get_num_decls();
-        unsigned num_sks        = sks.size();
         // Remark: sks were created for the flat version of q.
-        SASSERT(num_sks == flat_num_decls);
-        SASSERT(flat_num_decls >= num_decls);
-        SASSERT(num_sks >= num_decls);
+        SASSERT(get_flat_quantifier(q)->get_num_decls() == sks.size());
+        SASSERT(sks.size() >= num_decls);
         for (unsigned i = 0; i < num_decls; i++) {
             expr * sk = sks.get(num_decls - i - 1);
             instantiation_set const * s = get_uvar_inst_set(q, i);

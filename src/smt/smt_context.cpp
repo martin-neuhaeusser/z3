@@ -2259,6 +2259,7 @@ namespace smt {
                     }
                     
                     unsigned ilvl       = 0;
+                    (void)ilvl;
                     for (unsigned j = 0; j < num; j++) {
                         expr * atom     = cls->get_atom(j);
                         bool   sign     = cls->get_atom_sign(j);
@@ -2855,8 +2856,7 @@ namespace smt {
         propagate();
         if (was_consistent && inconsistent()) {
             // logical context became inconsistent during user PUSH
-            bool res = resolve_conflict(); // build the proof
-            SASSERT(!res);
+            VERIFY(!resolve_conflict()); // build the proof
         }
         push_scope();
         m_base_scopes.push_back(base_scope());
@@ -2939,7 +2939,7 @@ namespace smt {
         if (!m_asserted_formulas.inconsistent()) {
             unsigned sz    = m_asserted_formulas.get_num_formulas();
             unsigned qhead = m_asserted_formulas.get_qhead();
-            while (qhead < sz) {
+            while (qhead < sz && !m_manager.canceled()) {
                 expr * f   = m_asserted_formulas.get_formula(qhead);
                 proof * pr = m_asserted_formulas.get_formula_proof(qhead);
                 internalize_assertion(f, pr, 0);
@@ -2996,6 +2996,8 @@ namespace smt {
             // in a consistent context.
             if (inconsistent())
                 return; 
+            if (get_cancel_flag())
+                return;
             push_scope();
             for (unsigned i = 0; i < num_assumptions; i++) {
                 expr * curr_assumption = assumptions[i];
@@ -3110,8 +3112,7 @@ namespace smt {
         else {
             TRACE("after_internalization", display(tout););
             if (inconsistent()) {
-                bool res = resolve_conflict(); // build the proof
-                SASSERT(!res);
+                VERIFY(!resolve_conflict()); // build the proof
                 r = l_false;
             }
             else {
@@ -3197,8 +3198,7 @@ namespace smt {
                 init_assumptions(num_assumptions, assumptions);
                 TRACE("after_internalization", display(tout););
                 if (inconsistent()) {
-                    bool res = resolve_conflict(); // build the proof
-                    SASSERT(!res);
+                    VERIFY(!resolve_conflict()); // build the proof
                     mk_unsat_core();
                     r = l_false;
                 }
@@ -3339,6 +3339,7 @@ namespace smt {
                     break; 
                 }
                 if (cmr == quantifier_manager::UNKNOWN) {
+                    IF_VERBOSE(1, verbose_stream() << "(smt.giveup quantifiers)\n";);
                     // giving up
                     m_last_search_failure = QUANTIFIERS;
                     status                = l_undef;
@@ -3489,6 +3490,7 @@ namespace smt {
             }
 
             if (resource_limits_exceeded() && !inconsistent()) {
+                m_last_search_failure = RESOURCE_LIMIT;
                 return l_undef;
             }
         }
@@ -4111,7 +4113,7 @@ namespace smt {
               m_fingerprints.display(tout); 
               );
         failure fl = get_last_search_failure();
-        if (fl == MEMOUT || fl == CANCELED || fl == TIMEOUT || fl == NUM_CONFLICTS) {
+        if (fl == MEMOUT || fl == CANCELED || fl == TIMEOUT || fl == NUM_CONFLICTS || fl == RESOURCE_LIMIT) {
             return;
         }
 
